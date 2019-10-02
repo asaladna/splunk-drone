@@ -520,20 +520,7 @@ public class MainActivity extends AppCompatActivity {
     protected void startTelemetryTask() {
 
 
-        DJISDKManager.getInstance().getProduct().getBattery().setStateCallback(new BatteryState.Callback() {
-            @Override
-            public void onUpdate(BatteryState batteryState) {
-                if (batteryState == null) return;
-                else {
-                    int charge = batteryState.getChargeRemainingInPercent();
-                    float temperature = batteryState.getTemperature();
 
-                    Log.e("Battery", String.valueOf(charge));
-                    Log.e("Temperature", String.valueOf(temperature));
-
-                }
-            }
-        });
 
 
 
@@ -569,6 +556,24 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception e){
                     Log.e("Trying Timer Task", e.getMessage());
                 }
+
+
+                DJISDKManager.getInstance().getProduct().getBattery().setStateCallback(new BatteryState.Callback() {
+                    @Override
+                    public void onUpdate(BatteryState batteryState) {
+                        if (batteryState == null) return;
+                        else {
+                            int charge = batteryState.getChargeRemainingInPercent();
+                            float temperature = batteryState.getTemperature();
+
+                            Log.e("Battery", String.valueOf(charge));
+                            Log.e("Temperature", String.valueOf(temperature));
+
+                        }
+                    }
+                });
+
+
             }
         };
         // Schedule the task to run at a fixed interval
