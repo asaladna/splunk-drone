@@ -25,6 +25,22 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.VolleyError;
+import com.android.volley.Response;
+import com.android.volley.AuthFailureError;
+import com.android.volley.VolleyLog;
+import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.Volley;
+import com.android.volley.toolbox.StringRequest;
+
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
@@ -40,11 +56,14 @@ import com.dji.sdk.sample.internal.view.PresentableView;
 import com.squareup.otto.Subscribe;
 
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Stack;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.io.UnsupportedEncodingException;
 
 import dji.common.battery.BatteryState;
 import dji.common.error.DJIError;
@@ -59,12 +78,23 @@ import dji.sdk.sdkmanager.DJISDKManager;
 
 public class MainActivity extends AppCompatActivity {
 
+
     // The rate at which we will run our task in seconds
-    private int telemetryTaskRateSeconds = 1;
+    private int telemetryTaskRateSeconds = 5;
     // Convert to milliseconds as this is what the timer API expects
     private int telemetryTaskRateMs = telemetryTaskRateSeconds * 1000;
     // Timer object we will use to schedule and cancel the task
     private Timer telemetryTaskTimer;
+
+    // HTTP HEC Endpoint
+    String ec2URL = "54.153.8.100";
+    String hecPort = "8088";
+    String hecEndpoint = "/services/collector";
+    String hecToken = "06136b13-c8ff-4be1-861b-15dbf1baceaf";
+    String hecURL = "http://" + ec2URL + ":" + hecPort + hecEndpoint;
+
+    RequestQueue requestQueue;
+
 
 
     private static final String TAG = MainActivity.class.getSimpleName();
@@ -112,6 +142,8 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         checkAndRequestPermissions();
         DJISampleApplication.getEventBus().register(this);
+
+        requestQueue = Volley.newRequestQueue(this);
 
         setContentView(R.layout.activity_main);
 
@@ -586,8 +618,131 @@ public class MainActivity extends AppCompatActivity {
         // Cancel the timer and remove any queued but not yet executed tasks
         telemetryTaskTimer.cancel();
     }
+    public String getTimestampString() {
+        // Get Time Stamp to be sent as _time for Splunk
+        Long tsLong = System.currentTimeMillis()/1000;
+        return tsLong.toString();
+    }
+    public JSONObject addMetricToFields(String metric_name, Object _value){
+        //String fields = "\"metric_name\":\"" + metric_name + "\",\"_value\"" + _value.toString() + "\"";
+        JSONObject fields = new JSONObject();
+        try {
 
-    public void getVelocityOnClick(View view) { };
+            /** Add Dimensions Here */
 
+            fields.put("metric_name", metric_name);
+            fields.put("_value", _value);
+
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+
+        return fields;
+    }
+    public JSONObject createMetricDataBody(String _time, String metric_name, Object _value) {
+        JSONObject metricEvent = new JSONObject();
+
+        try {
+            metricEvent.put("time", _time);
+            metricEvent.put("event", "metric");
+            metricEvent.put("source", "spark");
+            metricEvent.put("host", "Goose");
+            metricEvent.put("index", "telemetrytest");
+
+            metricEvent.put("fields", addMetricToFields(metric_name, _value));
+
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+
+        return metricEvent;
+
+    }
+
+    public String addMetricDataBody(ArrayList<JSONObject> metricObjects) {
+
+        String temp = "";
+
+        for (int i=0; i<metricObjects.size(); i++) {
+            temp += metricObjects.get(i).toString();
+        }
+
+        return temp;
+    }
+
+    public StringRequest createPostRequest(String metricListForPost){
+        // metricEvent is the JSON payload to send to Splunk...
+        StringRequest stringRequest = new StringRequest(Request.Method.POST, hecURL, new Response.Listener<String>() {
+            @Override
+            public void onResponse(String response) {
+                Log.e("HTTP Response", response.toString());
+
+            }
+        }, new Response.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError error) {
+                error.printStackTrace();
+            }
+        }){
+
+            @Override
+            public Map<String, String> getHeaders() throws AuthFailureError {
+                HashMap<String, String> headers = new HashMap<String, String>();
+                headers.put("Authorization", "Splunk " + hecToken);
+                headers.put("Content-Type","application/x-www-form-urlencoded");
+
+                return headers;
+            }
+
+            @Override
+            public byte[] getBody() throws AuthFailureError {
+                String httpPostBody = metricListForPost;
+                // usually you'd have a field with some values you'd want to escape, you need to do it yourself if overriding getBody. here's how you do it
+                try {
+                    return metricListForPost == null ? null : metricListForPost.getBytes("utf-8");
+
+                } catch (UnsupportedEncodingException exception) {
+                    Log.e("ERROR", "exception", exception);
+                    // return null and don't pass any POST string if you encounter encoding error
+                    return null;
+                }
+            }
+
+        };
+
+        return stringRequest;
+    }
+
+
+
+
+
+    public void testHTTPPost(View view) {
+        // Code to clear cache...using for testing...might need later
+        // requestQueue.getCache().clear();
+
+        // Get Time Stamp to be sent as _time for Splunk
+        String ts = getTimestampString();
+        Log.e("Timestamp",ts);
+
+        // Create JSON Object to send to Metric store
+        JSONObject metric;
+        ArrayList<JSONObject> metricList = new ArrayList<JSONObject>();
+        String metricListForPost = "";
+
+        metric = createMetricDataBody(ts, "velocityX", 123456789);
+        metricList.add(metric);
+        metric = createMetricDataBody(ts, "velocityY", 987654321);
+        metricList.add(metric);
+        metric = createMetricDataBody(ts, "velocityZ", 9997);
+        metricList.add(metric);
+
+        metricListForPost = addMetricDataBody(metricList);
+        StringRequest hecPost = createPostRequest(metricListForPost);
+
+        // Add HTTP Post to a queue to be run by background threads
+        requestQueue.add(hecPost);
+
+    }
 
 }
